@@ -225,16 +225,22 @@ def has_more_locked_questions():
         return bool(res)
 
 
+def get_user_by_name(name):
+    with get_db() as conn:
+        res = conn.execute("SELECT * FROM users WHERE name = ?", (name,)).fetchone()
+        return dict(res) if res else None
+
+
 def sync_answers_from_data(answers_data):
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT user_id, username FROM users")
-        user_map = {row["username"]: row["user_id"] for row in cursor.fetchall()}
+        cursor.execute("SELECT user_id, name FROM users")
+        user_map = {row["name"]: row["user_id"] for row in cursor.fetchall()}
 
         for a in answers_data:
-            username = a["username"]
-            if username in user_map:
-                user_id = user_map[username]
+            name = a["name"]
+            if name in user_map:
+                user_id = user_map[name]
                 cursor.execute(
                     "INSERT OR REPLACE INTO answers (user_id, question_text, answer_text) VALUES (?, ?, ?)",
                     (user_id, a["question_text"], a["answer_text"]),

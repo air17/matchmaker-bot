@@ -103,12 +103,12 @@ async def sync_answers(questions):
             if len(rows) > 2:
                 for row in rows[2:]:
                     if len(row) >= 3:
-                        username = row[1].strip()
+                        name = row[0].strip()
                         answer_text = row[2].strip()
-                        if username and answer_text:
+                        if name and answer_text:
                             answers_data.append(
                                 {
-                                    "username": username,
+                                    "name": name,
                                     "question_text": q["text"],
                                     "answer_text": answer_text,
                                 }
@@ -141,7 +141,7 @@ async def update_user_roster():
             [
                 user["user_id"],
                 user["name"],
-                user["username"],
+                user["username"] if user["username"] else "",
                 user["gender"],
                 user["looking_for"],
                 user.get("status", ""),
@@ -321,7 +321,9 @@ async def append_answer_to_q_sheet(user, question, answer_text):
         except Exception as e:
             print(f"Error formatting new worksheet: {e}")
 
-    await ws.append_row([user["name"], user["username"], answer_text])
+    await ws.append_row(
+        [user["name"], user["username"] if user["username"] else "", answer_text]
+    )
 
 
 async def recalculate_top_matches():
@@ -515,14 +517,21 @@ async def clear_user_from_sheets(user):
 
     await recalculate_top_matches()
 
-    worksheets = await b_sheet.worksheets()
-    for ws in worksheets:
-        if ws.title.startswith("Вопрос"):
-            try:
-                cell = await ws.find(user["username"])
-                if cell:
-                    await ws.delete_rows(cell.row)
-            except gspread.exceptions.CellNotFound:
-                pass
-            except Exception as e:
-                print(f"Error removing user from {ws.title}: {e}")
+    # Remove user from all question sheets in Spreadsheet B
+    name = user.get("name")
+    if name:
+        worksheets = await b_sheet.worksheets()
+        for ws in worksheets:
+            if ws.title.startswith("Вопрос"):
+                try:
+                    # Use findall to handle potential duplicate rows and specify column 1 (Name)
+                    cells = await ws.findall(name, in_col=1)
+                    if cells:
+                        # Sort row indices in descending order to maintain valid indices while deleting
+                        rows_to_delete = sorted(
+                            list(set(c.row for c in cells)), reverse=True
+                        )
+                        for row_idx in rows_to_delete:
+                            await ws.delete_rows(row_idx)
+                except Exception as e:
+                    print(f"Error removing user '{name}' from {ws.title}: {e}")

@@ -129,10 +129,15 @@ async def cmd_reset_user(message: types.Message, state: FSMContext):
     target_user = None
     users = db.get_all_users()
     for u in users:
+        uid_str = str(u["user_id"])
+        uname = u["username"] if u["username"] else ""
+        real_name = u["name"] if u["name"] else ""
+
         if (
-            str(u["user_id"]) == target
-            or f"@{u['username']}" == target
-            or u["username"] == target.replace("@", "")
+            uid_str == target
+            or f"@{uname}" == target
+            or uname == target.replace("@", "")
+            or real_name.lower() == target.lower()
         ):
             target_user = u
             break
@@ -240,12 +245,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
             return
 
     # New user Registration
-    if not message.from_user.username:
-        await message.reply(
-            "Внимание: для участия необходим Telegram @username. Пожалуйста, установите его в профиле Telegram и попробуйте снова."
-        )
-        return
-
     db.add_or_update_user(
         user_id=message.from_user.id,
         name="Pending",
@@ -261,10 +260,20 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
 @router.message(RegistrationStates.waiting_for_name)
 async def process_name(message: types.Message, state: FSMContext):
+    new_name = message.text.strip()
+
+    # Check if name already exists (excluding the current user if they already have this name)
+    existing_user = db.get_user_by_name(new_name)
+    if existing_user and existing_user["user_id"] != message.from_user.id:
+        await message.reply(
+            "Такое имя уже есть, напишите как-нибудь по-другому или добавьте цифру"
+        )
+        return
+
     # Update real name
     db.add_or_update_user(
         user_id=message.from_user.id,
-        name=message.text,
+        name=new_name,
         username=message.from_user.username,
     )
     await gs.update_user_roster()

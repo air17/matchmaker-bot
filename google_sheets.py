@@ -10,6 +10,7 @@ load_dotenv()
 
 SPREADSHEET_A_ID = os.getenv("SPREADSHEET_A_ID")
 SPREADSHEET_B_ID = os.getenv("SPREADSHEET_B_ID")
+SPREADSHEET_C_ID = os.getenv("SPREADSHEET_C_ID")
 GOOGLE_CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_FILE")
 
 
@@ -73,6 +74,19 @@ async def _ensure_b_client():
         return client, b_sheet
     except Exception as e:
         print(f"Error opening Spreadsheet B: {e}")
+        return None, None
+
+
+async def _ensure_c_client():
+    client = await get_client()
+    if not client:
+        return None, None
+
+    try:
+        c_sheet = await client.open_by_key(SPREADSHEET_C_ID)
+        return client, c_sheet
+    except Exception as e:
+        print(f"Error opening Spreadsheet C: {e}")
         return None, None
 
 
@@ -311,9 +325,9 @@ async def append_answer_to_q_sheet(user, question, answer_text):
 
 
 async def recalculate_top_matches():
-    """Calculates top matches and writes to Spreadsheet B."""
-    _, b_sheet = await _ensure_b_client()
-    if not b_sheet:
+    """Calculates top matches and writes to Spreadsheet C (results spreadsheet)."""
+    _, c_sheet = await _ensure_c_client()
+    if not c_sheet:
         return
 
     users = db.get_all_users()
@@ -390,9 +404,9 @@ async def recalculate_top_matches():
             top_matches_summary.append([u_display, "Нет мэтчей", 0, ""])
 
     try:
-        ws_summary = await b_sheet.worksheet("Топ мэтчей")
+        ws_summary = await c_sheet.worksheet("Топ мэтчей")
     except gspread.exceptions.WorksheetNotFound:
-        ws_summary = await b_sheet.add_worksheet(title="Топ мэтчей", rows=100, cols=10)
+        ws_summary = await c_sheet.add_worksheet(title="Топ мэтчей", rows=100, cols=10)
 
     summary_header = [
         ["Пользователь", "Лучший мэтч", "Совпадений", "Совпавшие вопросы"]
@@ -404,9 +418,9 @@ async def recalculate_top_matches():
         uid = u["user_id"]
         sheet_name = f"Топ {u['name']}"[:100]
         try:
-            ws_user = await b_sheet.worksheet(sheet_name)
+            ws_user = await c_sheet.worksheet(sheet_name)
         except gspread.exceptions.WorksheetNotFound:
-            ws_user = await b_sheet.add_worksheet(title=sheet_name, rows=100, cols=10)
+            ws_user = await c_sheet.add_worksheet(title=sheet_name, rows=100, cols=10)
 
         user_header = [["Мэтч", "Совпадений", "Совпавшие вопросы"]]
         matches = all_user_matches[uid]
@@ -426,9 +440,11 @@ async def clear_user_from_sheets(user):
     await update_user_roster()
 
     try:
-        sheet_name = f"Топ {user['name']}"[:100]
-        ws_user = await b_sheet.worksheet(sheet_name)
-        await b_sheet.del_worksheet(ws_user)
+        _, c_sheet = await _ensure_c_client()
+        if c_sheet:
+            sheet_name = f"Топ {user['name']}"[:100]
+            ws_user = await c_sheet.worksheet(sheet_name)
+            await c_sheet.del_worksheet(ws_user)
     except gspread.exceptions.WorksheetNotFound:
         pass
     except Exception as e:

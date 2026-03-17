@@ -168,17 +168,21 @@ def recalculate_top_matches():
     # We need to map user_id -> list of matches
     all_user_matches = {u["user_id"]: [] for u in completed_users}
 
+    all_questions = db.get_all_questions()
+    q_map = {q["text"]: i + 1 for i, q in enumerate(all_questions)}
+
     for u1, u2 in combinations(completed_users, 2):
         a1 = user_answers.get(u1["user_id"], {})
         a2 = user_answers.get(u2["user_id"], {})
 
         shared_q = set(a1.keys()).intersection(set(a2.keys()))
         match_count = 0
-        matched_q_texts = []
+        matched_q_indices = []
         for qtext in shared_q:
             if a1[qtext] == a2[qtext]:
                 match_count += 1
-                matched_q_texts.append(qtext[:15] + "...")
+                if qtext in q_map:
+                    matched_q_indices.append(str(q_map[qtext]))
 
         u1_gender, u1_looking = (
             u1.get("gender", "").lower(),
@@ -193,7 +197,9 @@ def recalculate_top_matches():
         match_2_likes_1 = u2_looking == "all" or u2_looking == u1_gender
 
         if match_1_likes_2 and match_2_likes_1:
-            shared_q_str = ", ".join(matched_q_texts)
+            # Sort indices numerically
+            matched_q_indices.sort(key=int)
+            shared_q_str = ", ".join(matched_q_indices)
             u1_display = f"{u1['name']} (@{u1['username']})"
             u2_display = f"{u2['name']} (@{u2['username']})"
 

@@ -16,7 +16,7 @@ A Telegram matchmaking bot (Russian-language UI) built with **aiogram 3** and ba
 - A [Telegram bot token](https://core.telegram.org/bots#botfather)
 - A Google Cloud service account with the Google Sheets API enabled
   - Download the service account key as `credentials.json`
-  - Share both spreadsheets with the service account email
+  - Share all three spreadsheets with the service account email
 
 ## Installation
 
@@ -27,13 +27,20 @@ A Telegram matchmaking bot (Russian-language UI) built with **aiogram 3** and ba
    cd matchmaker-bot
    ```
 
-2. **Install dependencies**
+2. **Create and activate a virtual environment**
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+
+3. **Install dependencies**
 
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Configure environment variables**
+4. **Configure environment variables**
 
    Copy the example file and fill in the required values:
 
@@ -48,18 +55,20 @@ A Telegram matchmaking bot (Russian-language UI) built with **aiogram 3** and ba
    | `BOT_TOKEN` | Telegram bot token from BotFather |
    | `GOOGLE_CREDENTIALS_FILE` | Path to the service account JSON key (default: `credentials.json`) |
    | `SPREADSHEET_A_ID` | Google Sheet ID for questions input |
-   | `SPREADSHEET_B_ID` | Google Sheet ID for answers/results output |
+   | `SPREADSHEET_B_ID` | Google Sheet ID for user roster and per-question answers |
+   | `SPREADSHEET_C_ID` | Google Sheet ID for match results output |
    | `INITIAL_ADMIN_ID` | Telegram user ID of the first admin (seeded on startup) |
    | `INITIAL_ADMIN_USERNAME` | Telegram username of the first admin |
 
-4. **Place `credentials.json`** (Google service account key) in the project root (or the path set in `GOOGLE_CREDENTIALS_FILE`).
+5. **Place `credentials.json`** (Google service account key) in the project root (or the path set in `GOOGLE_CREDENTIALS_FILE`).
 
-5. **Set up Google Sheets**
+6. **Set up Google Sheets**
 
    - **Spreadsheet A** — questions sheet with columns: `Question_Text`, `Option_1`, `Option_2`, …
-   - **Spreadsheet B** — output sheet; tabs are created automatically by the bot.
+   - **Spreadsheet B** — user roster and per-question answers; tabs are created automatically by the bot.
+   - **Spreadsheet C** — match results output; tabs are created automatically by the bot.
 
-6. **Run the bot**
+7. **Run the bot**
 
    ```bash
    python bot.py

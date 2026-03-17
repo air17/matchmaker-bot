@@ -63,7 +63,7 @@ def sync_answers(questions):
         return []
     answers_data = []
     for idx, q in enumerate(questions):
-        q_tab_name = f"Q{idx + 1}"
+        q_tab_name = f"Вопрос {idx + 1}"
         try:
             ws = b_sheet.worksheet(q_tab_name)
             rows = ws.get_all_values()
@@ -81,7 +81,7 @@ def sync_answers(questions):
         except gspread.exceptions.WorksheetNotFound:
             pass
         except Exception as e:
-            print(f"Error syncing answers for {q_tab_name}: {e}")
+            print(f"Ошибка синхронизации ответов для {q_tab_name}: {e}")
     return answers_data
 
 def update_user_roster():
@@ -91,13 +91,13 @@ def update_user_roster():
         return
     
     try:
-        ws = b_sheet.worksheet("Users")
+        ws = b_sheet.worksheet("Пользователи")
     except gspread.exceptions.WorksheetNotFound:
-        ws = b_sheet.add_worksheet(title="Users", rows="100", cols="10")
-        ws.append_row(["User_ID", "Name", "Username", "Gender", "Looking_For", "Status"])
+        ws = b_sheet.add_worksheet(title="Пользователи", rows="100", cols="10")
+        ws.append_row(["ID пользователя", "Имя", "Username", "Пол", "Ищет", "Статус"])
         
     users = db.get_all_users()
-    rows = [["User_ID", "Name", "Username", "Gender", "Looking_For", "Status"]]
+    rows = [["ID пользователя", "Имя", "Username", "Пол", "Ищет", "Статус"]]
     for user in users:
         rows.append([user['user_id'], user['name'], user['username'], user['gender'], user['looking_for'], user.get('status', '')])
         
@@ -120,13 +120,13 @@ def append_answer_to_q_sheet(user, question, answer_text):
             q_index = idx + 1
             break
             
-    q_tab_name = f"Q{q_index}"
+    q_tab_name = f"Вопрос {q_index}"
     try:
         ws = b_sheet.worksheet(q_tab_name)
     except gspread.exceptions.WorksheetNotFound:
         ws = b_sheet.add_worksheet(title=q_tab_name, rows="100", cols="10")
         ws.append_row([question['text']])
-        ws.append_row(["Name", "Username", "Answer"])
+        ws.append_row(["Имя", "Username", "Ответ"])
         
     ws.append_row([user['name'], user['username'], answer_text])
 
@@ -193,19 +193,19 @@ def recalculate_top_matches():
     
     # Write Filtered
     try:
-        ws_filtered = b_sheet.worksheet("Top Matches (Filtered)")
+        ws_filtered = b_sheet.worksheet("Топ пар (отфильтровано)")
     except gspread.exceptions.WorksheetNotFound:
-        ws_filtered = b_sheet.add_worksheet(title="Top Matches (Filtered)", rows="100", cols="10")
+        ws_filtered = b_sheet.add_worksheet(title="Топ пар (отфильтровано)", rows="100", cols="10")
         
-    header = [["User A", "User B", "Match Count", "Matched Questions List"]]
+    header = [["Пользователь А", "Пользователь Б", "Совпадений", "Совпавшие вопросы"]]
     ws_filtered.clear()
     ws_filtered.update(header + filtered_matches)
     
     # Write Unfiltered
     try:
-        ws_unfiltered = b_sheet.worksheet("Top Matches (Unfiltered)")
+        ws_unfiltered = b_sheet.worksheet("Топ пар (без фильтра)")
     except gspread.exceptions.WorksheetNotFound:
-        ws_unfiltered = b_sheet.add_worksheet(title="Top Matches (Unfiltered)", rows="100", cols="10")
+        ws_unfiltered = b_sheet.add_worksheet(title="Топ пар (без фильтра)", rows="100", cols="10")
         
     ws_unfiltered.clear()
     ws_unfiltered.update(header + unfiltered_matches)
@@ -221,7 +221,7 @@ def clear_user_from_sheets(user):
     if not b_sheet:
         return
     for ws in b_sheet.worksheets():
-        if ws.title.startswith("Q"):
+        if ws.title.startswith("Вопрос"):
             try:
                 cell = ws.find(user['username'])
                 if cell:

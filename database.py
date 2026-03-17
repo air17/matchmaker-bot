@@ -44,9 +44,17 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS questions (
                 question_text TEXT PRIMARY KEY,
-                options TEXT
+                options TEXT,
+                is_unlocked INTEGER DEFAULT 0
             )
         """)
+        # For existing tables, add the column if it doesn't exist
+        try:
+            cursor.execute(
+                "ALTER TABLE questions ADD COLUMN is_unlocked INTEGER DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
         # Answers table
         cursor.execute("""
@@ -144,9 +152,14 @@ def sync_questions(questions_data):
         incoming_texts = [q["text"] for q in questions_data]
 
         for q in questions_data:
+            # We use INSERT OR IGNORE then UPDATE to avoid overwriting is_unlocked if it already exists
             cursor.execute(
-                "INSERT OR REPLACE INTO questions (question_text, options) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO questions (question_text, options, is_unlocked) VALUES (?, ?, 0)",
                 (q["text"], json.dumps(q["options"])),
+            )
+            cursor.execute(
+                "UPDATE questions SET options = ? WHERE question_text = ?",
+                (json.dumps(q["options"]), q["text"]),
             )
 
         cursor.execute("SELECT question_text FROM questions")
@@ -162,9 +175,54 @@ def get_all_questions():
     with get_db() as conn:
         res = conn.execute("SELECT * FROM questions").fetchall()
         return [
+            {
+                "text": r["question_text"],
+                "options": json.loads(r["options"]),
+                "is_unlocked": bool(r["is_unlocked"]),
+            }
+            for r in res
+        ]
+
+
+def get_unlocked_questions():
+    with get_db() as conn:
+        res = conn.execute(
+            "SELECT * FROM questions WHERE is_unlocked = 1 ORDER BY ROWID"
+        ).fetchall()
+        return [
             {"text": r["question_text"], "options": json.loads(r["options"])}
             for r in res
         ]
+
+
+def unlock_next_question():
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # Find first locked question
+        res = cursor.execute(
+            "SELECT question_text FROM questions WHERE is_unlocked = 0 ORDER BY ROWID LIMIT 1"
+        ).fetchone()
+        if res:
+            q_text = res["question_text"]
+            cursor.execute(
+                "UPDATE questions SET is_unlocked = 1 WHERE question_text = ?",
+                (q_text,),
+            )
+            return q_text
+        return None
+
+
+def lock_all_questions():
+    with get_db() as conn:
+        conn.execute("UPDATE questions SET is_unlocked = 0")
+
+
+def has_more_locked_questions():
+    with get_db() as conn:
+        res = conn.execute(
+            "SELECT 1 FROM questions WHERE is_unlocked = 0 LIMIT 1"
+        ).fetchone()
+        return bool(res)
 
 
 def sync_answers_from_data(answers_data):

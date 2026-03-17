@@ -61,25 +61,55 @@ async def cmd_sync(message: types.Message, state: FSMContext):
         await message.reply(f"Ошибка при обновлении топов: {e}")
 
 
+@router.message(Command("unlock"))
+@ensure_admin
+async def cmd_unlock(message: types.Message, state: FSMContext):
+    q_text = db.unlock_next_question()
+    if q_text:
+        await message.reply(f"Следующий вопрос разблокирован: {q_text}")
+
+        # Broadcast to users who have finished all previously unlocked questions
+        users = db.get_all_users()
+        unlocked_questions = db.get_unlocked_questions()
+
+        for user in users:
+            if user["status"] == "answering":
+                answers = db.get_user_answers(user["user_id"])
+                # If they have answered all UNLOCKED questions except the one just unlocked
+                if len(answers) == len(unlocked_questions) - 1:
+                    try:
+                        await serve_next_question(
+                            None, None, user["user_id"], bot=message.bot
+                        )
+                    except Exception as e:
+                        print(f"Failed to send broadcast to {user['user_id']}: {e}")
+    else:
+        await message.reply("Нет больше закрытых вопросов.")
+
+
+@router.message(Command("lock"))
+@ensure_admin
+async def cmd_lock(message: types.Message, state: FSMContext):
+    db.lock_all_questions()
+    await message.reply("Все вопросы заблокированы.")
+
+
 @router.message(Command("help"))
 async def cmd_help(message: types.Message, state: FSMContext):
     is_admin = db.is_admin(message.from_user.id)
 
-    help_text = (
-        "<b>Доступные команды:</b>\n\n"
-        "/start - Начать регистрацию или продолжить заполнение анкеты\n"
-        "/help - Показать это сообщение\n\n"
-        "<i>Если у вас есть вопросы, можете задать их ведущему.</i>"
-    )
+    help_text = "<i>Если у вас есть вопросы, можете задать их ведущему.</i>"
 
     if is_admin:
         help_text += (
-            "\n\n<b>Команды администратора:</b>\n"
-            "/update - Синхронизировать вопросы/ответы из таблиц\n"
-            "/sync - Принудительно пересчитать топы\n"
-            "/reset_user &lt;id/username&gt; - Полностью удалить пользователя\n"
-            "/add_admin &lt;id&gt; &lt;username&gt; - Добавить админа\n"
-            "/list_admins - Список всех администраторов"
+            "\n\n<b>Команды администратора:</b>\n\n"
+            "/unlock - Открыть следующий вопрос\n\n"
+            "/update - Синхронизировать вопросы из таблицы\n\n"
+            "/sync - Принудительно пересчитать совпадения\n\n"
+            "/lock - Заблокировать все вопросы\n\n"
+            "/delete &lt;id/username&gt; - Полностью удалить пользователя\n\n"
+            "/add_admin &lt;id&gt; &lt;username&gt; - Добавить админа\n\n"
+            "/list_admins - Список всех администраторов\n\n"
         )
 
     await message.answer(help_text, parse_mode="HTML")
@@ -302,7 +332,9 @@ async def process_looking_for(callback: types.CallbackQuery, state: FSMContext):
     await serve_next_question(callback.message, state, callback.from_user.id)
 
 
-async def serve_next_question(message: types.Message, state: FSMContext, user_id: int):
+async def serve_next_question(
+    message: types.Message, state: FSMContext, user_id: int, bot=None
+):
     user = db.get_user(user_id)
     if (
         not user
@@ -310,28 +342,35 @@ async def serve_next_question(message: types.Message, state: FSMContext, user_id
         or not user.get("gender")
         or not user.get("looking_for")
     ):
-        await message.answer(
-            "Пожалуйста, сначала заполните профиль! Используйте /start для регистрации."
-        )
+        if message:
+            await message.answer(
+                "Пожалуйста, сначала заполните профиль! Используйте /start для регистрации."
+            )
         return
 
     # Remove callback logic issue, send standard message
-    questions = db.get_all_questions()
-    if not questions:
-        await message.answer(
-            "Вопросы ещё не настроены. Попросите администратора выполнить /update."
-        )
+    unlocked_questions = db.get_unlocked_questions()
+    all_questions_exist = db.get_all_questions()
+    if not all_questions_exist:
+        if message:
+            await message.answer("Вопросы ещё не настроены.")
         return
 
     answers = db.get_user_answers(user_id)
 
     next_question = None
-    for q in questions:
+    for q in unlocked_questions:
         if q["text"] not in answers:
             next_question = q
             break
 
     if not next_question:
+        # Check if there are more LOCKED questions
+        if db.has_more_locked_questions():
+            if message:
+                await message.answer("Следующий вопрос на подходе! Ожидайте.")
+            return
+
         # User finished everything
         user = db.get_user(user_id)
         db.add_or_update_user(
@@ -344,8 +383,13 @@ async def serve_next_question(message: types.Message, state: FSMContext, user_id
         )
         asyncio.create_task(gs.update_user_roster())
         asyncio.create_task(gs.recalculate_top_matches())
-        await message.answer("Поздравляем! Вы ответили на все вопросы.")
-        await state.clear()
+        if message:
+            await message.answer("Поздравляем! Вы ответили на все вопросы.")
+        else:
+            await bot.send_message(user_id, "Поздравляем! Вы ответили на все вопросы.")
+
+        if state:
+            await state.clear()
         return
 
     builder = InlineKeyboardBuilder()
@@ -368,8 +412,17 @@ async def serve_next_question(message: types.Message, state: FSMContext, user_id
     )
     msg_text = f"<b>{next_question['text']}</b>\n\n{opt_text}"
 
-    await message.answer(msg_text, reply_markup=builder.as_markup(), parse_mode="HTML")
-    await state.set_state(AnsweringStates.answering_questions)
+    if message:
+        await message.answer(
+            msg_text, reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+    else:
+        await bot.send_message(
+            user_id, msg_text, reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+
+    if state:
+        await state.set_state(AnsweringStates.answering_questions)
 
 
 # Removed AnsweringStates state filter so it catches clicks even if bot restarted (MemoryStorage wiped)
@@ -420,10 +473,18 @@ async def catch_all(message: types.Message, state: FSMContext):
     if user and user["status"] == "complete":
         # Ignore
         pass
-    else:
-        await message.reply(
-            "Пожалуйста, используйте кнопки или введите /start для регистрации."
-        )
+    elif user and user["status"] == "answering":
+        answers = db.get_user_answers(message.from_user.id)
+        unlocked_questions = db.get_unlocked_questions()
+        answered_unlocked = all(q["text"] in answers for q in unlocked_questions)
+
+        if answered_unlocked and db.has_more_locked_questions():
+            await message.reply("Следующий вопрос на подходе! Ожидайте.")
+            return
+
+    await message.reply(
+        "Пожалуйста, используйте кнопки или введите /start для регистрации."
+    )
 
 
 # Fallback: silently answer any stale / unrecognised callback queries so

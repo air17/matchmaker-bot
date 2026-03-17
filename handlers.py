@@ -46,12 +46,49 @@ async def cmd_update(message: types.Message, state: FSMContext):
     )
 
 
-@router.message(Command("reset_user"))
+@router.message(Command("sync"))
+@ensure_admin
+async def cmd_sync(message: types.Message, state: FSMContext):
+    await message.reply("Запуск пересчёта топов в Google Sheets...")
+    try:
+        await gs.recalculate_top_matches()
+        await message.reply("✓ Совпадения успешно пересчитаны и обновлены в таблице.")
+    except Exception as e:
+        await message.reply(f"Ошибка при обновлении топов: {e}")
+
+
+@router.message(Command("help"))
+async def cmd_help(message: types.Message, state: FSMContext):
+    is_admin = db.is_admin(message.from_user.id)
+
+    help_text = (
+        "<b>Доступные команды:</b>\n\n"
+        "/start - Начать регистрацию или продолжить заполнение анкеты\n"
+        "/help - Показать это сообщение\n\n"
+        "<i>Если у вас есть вопросы, можете задать их ведущему.</i>"
+    )
+
+    if is_admin:
+        help_text += (
+            "\n\n<b>Команды администратора:</b>\n"
+            "/update - Синхронизировать вопросы/ответы из таблиц\n"
+            "/sync - Принудительно пересчитать топы\n"
+            "/reset_user &lt;id/username&gt; - Полностью удалить пользователя\n"
+            "/add_admin &lt;id&gt; &lt;username&gt; - Добавить админа\n"
+            "/list_admins - Список всех администраторов"
+        )
+
+    await message.answer(help_text, parse_mode="HTML")
+
+
+@router.message(Command("reset_user", "delete"))
 @ensure_admin
 async def cmd_reset_user(message: types.Message, state: FSMContext):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("Использование: /reset_user <@username или user_id>")
+        await message.reply(
+            "Использование: /reset_user или /delete <@username или user_id>"
+        )
         return
 
     target = args[1].strip()

@@ -15,4 +15,6 @@ matchmaking.db
 .vscode/
 .idea/
 .DS_Store
+
 credentials.json
+*.log

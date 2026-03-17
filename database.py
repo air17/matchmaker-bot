@@ -139,22 +139,6 @@ def get_all_questions():
         res = conn.execute('SELECT * FROM questions').fetchall()
         return [{'text': r['question_text'], 'options': json.loads(r['options'])} for r in res]
 
-def sync_users_from_data(users_data):
-    with get_db() as conn:
-        cursor = conn.cursor()
-        for u in users_data:
-            user_id = u.get("User_ID")
-            if not user_id:
-                continue
-            
-            cursor.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
-            if cursor.fetchone():
-                cursor.execute('UPDATE users SET name=?, username=?, gender=?, looking_for=?, status=? WHERE user_id=?',
-                               (u.get('Name'), u.get('Username'), u.get('Gender'), u.get('Looking_For'), u.get('Status'), user_id))
-            else:
-                cursor.execute('INSERT INTO users (user_id, name, username, gender, looking_for, status) VALUES (?, ?, ?, ?, ?, ?)',
-                               (user_id, u.get('Name'), u.get('Username'), u.get('Gender'), u.get('Looking_For'), u.get('Status')))
-
 def sync_answers_from_data(answers_data):
     with get_db() as conn:
         cursor = conn.cursor()

@@ -30,17 +30,13 @@ async def cmd_update(message: types.Message, state: FSMContext):
         return
     db.sync_questions(questions)
     
-    users_data = gs.sync_users()
-    if users_data:
-        db.sync_users_from_data(users_data)
-        
     answers_data = gs.sync_answers(questions)
     if answers_data:
         db.sync_answers_from_data(answers_data)
         
     gs.recalculate_top_matches()
     
-    await message.reply(f"Successfully synced {len(questions)} questions.\nSynced {len(users_data)} users and {len(answers_data)} answers from sheets.")
+    await message.reply(f"Successfully synced {len(questions)} questions and {len(answers_data)} answers from sheets.")
 
 @router.message(Command("reset_user"))
 @ensure_admin

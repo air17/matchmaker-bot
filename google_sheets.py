@@ -57,19 +57,6 @@ def _ensure_b_client():
         print(f"Error opening Spreadsheet B: {e}")
         return None, None
 
-def sync_users():
-    _, b_sheet = _ensure_b_client()
-    if not b_sheet:
-        return []
-    try:
-        ws = b_sheet.worksheet("Users")
-        return ws.get_all_records()
-    except gspread.exceptions.WorksheetNotFound:
-        return []
-    except Exception as e:
-        print(f"Error syncing users: {e}")
-        return []
-
 def sync_answers(questions):
     _, b_sheet = _ensure_b_client()
     if not b_sheet:

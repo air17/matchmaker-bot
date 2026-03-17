@@ -294,8 +294,8 @@ async def serve_next_question(message: types.Message, state: FSMContext, user_id
             looking_for=user["looking_for"],
             status="complete",
         )
-        gs.update_user_roster()
-        gs.recalculate_top_matches()
+        asyncio.create_task(asyncio.to_thread(gs.update_user_roster))
+        asyncio.create_task(asyncio.to_thread(gs.recalculate_top_matches))
         await message.answer("Поздравляем! Вы ответили на все вопросы.")
         await state.clear()
         return
@@ -356,10 +356,6 @@ async def process_answer(callback: types.CallbackQuery, state: FSMContext):
     db.save_answer(callback.from_user.id, question["text"], answer_text)
     user = db.get_user(callback.from_user.id)
     gs.append_answer_to_q_sheet(user, question, answer_text)
-
-    # Recalculate top matches silently in background
-    # (Doing this async/non-blocking if possible is better, but doing sync here for simplicity)
-    asyncio.create_task(asyncio.to_thread(gs.recalculate_top_matches))
 
     # Send chosen feedback shortly and load next
     await callback.answer()  # Clear the button spinner

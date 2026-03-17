@@ -146,7 +146,7 @@ def append_answer_to_q_sheet(user, question, answer_text):
 
 
 def recalculate_top_matches():
-    """Calculates strict and unfiltered matches and writes to Spreadsheet B."""
+    """Calculates top matches and writes to Spreadsheet B."""
     _, b_sheet = _ensure_b_client()
     if not b_sheet:
         return
@@ -162,14 +162,13 @@ def recalculate_top_matches():
             user_answers[uid] = {}
         user_answers[uid][a["question_text"]] = a["answer_text"]
 
-    filtered_matches = []
-    unfiltered_matches = []
+    completed_users = [u for u in users if u.get("status") == "complete"]
 
-    for u1, u2 in combinations(users, 2):
-        if not u1.get("status") == "complete" or not u2.get("status") == "complete":
-            continue
+    # Calculate all pairwise filtered matches
+    # We need to map user_id -> list of matches
+    all_user_matches = {u["user_id"]: [] for u in completed_users}
 
-        # Match count logic
+    for u1, u2 in combinations(completed_users, 2):
         a1 = user_answers.get(u1["user_id"], {})
         a2 = user_answers.get(u2["user_id"], {})
 
@@ -179,19 +178,8 @@ def recalculate_top_matches():
         for qtext in shared_q:
             if a1[qtext] == a2[qtext]:
                 match_count += 1
-                matched_q_texts.append(qtext[:15] + "...")  # Preview instead of Q1
+                matched_q_texts.append(qtext[:15] + "...")
 
-        match_record = [
-            f"{u1['name']} (@{u1['username']})",
-            f"{u2['name']} (@{u2['username']})",
-            match_count,
-            ", ".join(matched_q_texts),
-        ]
-
-        # Unfiltered
-        unfiltered_matches.append(match_record)
-
-        # Filtered logic
         u1_gender, u1_looking = (
             u1.get("gender", "").lower(),
             u1.get("looking_for", "").lower(),
@@ -201,39 +189,71 @@ def recalculate_top_matches():
             u2.get("looking_for", "").lower(),
         )
 
-        # Super simple check:
-        match_1_likes_2 = "all" in u1_looking or u2_gender in u1_looking
-        match_2_likes_1 = "all" in u2_looking or u1_gender in u2_looking
+        match_1_likes_2 = u1_looking == "all" or u1_looking == u2_gender
+        match_2_likes_1 = u2_looking == "all" or u2_looking == u1_gender
 
         if match_1_likes_2 and match_2_likes_1:
-            filtered_matches.append(match_record)
+            shared_q_str = ", ".join(matched_q_texts)
+            u1_display = f"{u1['name']} (@{u1['username']})"
+            u2_display = f"{u2['name']} (@{u2['username']})"
 
-    # Sort by match count descending
-    filtered_matches.sort(key=lambda x: x[2], reverse=True)
-    unfiltered_matches.sort(key=lambda x: x[2], reverse=True)
+            all_user_matches[u1["user_id"]].append(
+                (u2_display, match_count, shared_q_str)
+            )
+            all_user_matches[u2["user_id"]].append(
+                (u1_display, match_count, shared_q_str)
+            )
 
-    # Write Filtered
+    # Identify top match for each user for the summary sheet
+    top_matches_summary = []
+
+    for u in completed_users:
+        uid = u["user_id"]
+        u_display = f"{u['name']} (@{u['username']})"
+        matches = all_user_matches[uid]
+        if matches:
+            # Sort by match_count descending
+            matches.sort(key=lambda x: x[1], reverse=True)
+            top_match = matches[0]
+            top_matches_summary.append(
+                [u_display, top_match[0], top_match[1], top_match[2]]
+            )
+        else:
+            top_matches_summary.append([u_display, "Нет мэтчей", 0, ""])
+
+    # Write Top Matches Summary
     try:
-        ws_filtered = b_sheet.worksheet("Топ пар (отфильтровано)")
+        ws_summary = b_sheet.worksheet("Топ мэтчей")
     except gspread.exceptions.WorksheetNotFound:
-        ws_filtered = b_sheet.add_worksheet(
-            title="Топ пар (отфильтровано)", rows="100", cols="10"
-        )
+        ws_summary = b_sheet.add_worksheet(title="Топ мэтчей", rows="100", cols="10")
 
-    header = [["Пользователь А", "Пользователь Б", "Совпадений", "Совпавшие вопросы"]]
-    ws_filtered.clear()
-    ws_filtered.update(header + filtered_matches)
+    summary_header = [
+        ["Пользователь", "Лучший мэтч", "Совпадений", "Совпавшие вопросы"]
+    ]
+    ws_summary.clear()
+    ws_summary.update(summary_header + top_matches_summary)
 
-    # Write Unfiltered
-    try:
-        ws_unfiltered = b_sheet.worksheet("Топ пар (без фильтра)")
-    except gspread.exceptions.WorksheetNotFound:
-        ws_unfiltered = b_sheet.add_worksheet(
-            title="Топ пар (без фильтра)", rows="100", cols="10"
-        )
+    # Write individual user sheets
+    for u in completed_users:
+        uid = u["user_id"]
+        # Limit sheet name length as gspread might throw error on super long names, though 100 character limit usually
+        sheet_name = f"Топ {u['name']}"[:100]
+        try:
+            ws_user = b_sheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            ws_user = b_sheet.add_worksheet(title=sheet_name, rows="100", cols="10")
 
-    ws_unfiltered.clear()
-    ws_unfiltered.update(header + unfiltered_matches)
+        user_header = [["Мэтч", "Совпадений", "Совпавшие вопросы"]]
+
+        matches = all_user_matches[uid]
+        # Make sure they are sorted
+        matches.sort(key=lambda x: x[1], reverse=True)
+        # matches elements are (u2_display, match_count, shared_q_str)
+        # convert to list of lists for gspread
+        matches_rows = [[m[0], m[1], m[2]] for m in matches]
+
+        ws_user.clear()
+        ws_user.update(user_header + matches_rows)
 
 
 def clear_user_from_sheets(user):

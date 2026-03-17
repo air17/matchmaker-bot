@@ -10,6 +10,9 @@ import asyncio
 
 router = Router()
 
+GENDER_MAP = {"male": "Мужской", "female": "Женский"}
+LOOKING_FOR_MAP = {"male": "Мужчин", "female": "Женщин", "all": "Всех"}
+
 # ----------------- ADMIN COMMANDS ----------------- #
 
 
@@ -267,8 +270,9 @@ async def process_gender(callback: types.CallbackQuery, state: FSMContext):
     builder.add(types.InlineKeyboardButton(text="Всех", callback_data="looking_all"))
     builder.adjust(2, 1)
 
+    gender_ru = GENDER_MAP.get(gender, gender.capitalize())
     await callback.message.edit_text(
-        f"Пол выбран: {gender.capitalize()}\nКого вы ищете?",
+        f"Пол выбран: {gender_ru}\nКого вы ищете?",
         reply_markup=builder.as_markup(),
     )
     await state.set_state(RegistrationStates.waiting_for_looking_for)
@@ -290,8 +294,9 @@ async def process_looking_for(callback: types.CallbackQuery, state: FSMContext):
     )
     await gs.update_user_roster()
 
+    looking_for_ru = LOOKING_FOR_MAP.get(looking_for, looking_for.capitalize())
     await callback.message.edit_text(
-        f"Ищу: {looking_for.capitalize()}\nОтлично. Начинаем вопросы."
+        f"Ищу: {looking_for_ru}\nОтлично. Начинаем вопросы."
     )
     await serve_next_question(callback.message, state, callback.from_user.id)
 

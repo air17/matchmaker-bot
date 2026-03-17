@@ -414,6 +414,34 @@ async def recalculate_top_matches():
     await ws_summary.clear()
     await ws_summary.update(summary_header + top_matches_summary)
 
+    formatting_requests = [
+        # Bold summary header
+        {
+            "repeatCell": {
+                "range": {
+                    "sheetId": ws_summary.id,
+                    "startRowIndex": 0,
+                    "endRowIndex": 1,
+                },
+                "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+                "fields": "userEnteredFormat.textFormat.bold",
+            }
+        },
+        # Wide columns for names in summary
+        {
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": ws_summary.id,
+                    "dimension": "COLUMNS",
+                    "startIndex": 0,
+                    "endIndex": 2,
+                },
+                "properties": {"pixelSize": 250},
+                "fields": "pixelSize",
+            }
+        },
+    ]
+
     for u in completed_users:
         uid = u["user_id"]
         sheet_name = f"Топ {u['name']}"[:100]
@@ -429,6 +457,41 @@ async def recalculate_top_matches():
 
         await ws_user.clear()
         await ws_user.update(user_header + matches_rows)
+
+        # Add formatting for the individual sheet
+        formatting_requests.extend(
+            [
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": ws_user.id,
+                            "startRowIndex": 0,
+                            "endRowIndex": 1,
+                        },
+                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+                        "fields": "userEnteredFormat.textFormat.bold",
+                    }
+                },
+                {
+                    "updateDimensionProperties": {
+                        "range": {
+                            "sheetId": ws_user.id,
+                            "dimension": "COLUMNS",
+                            "startIndex": 0,
+                            "endIndex": 1,
+                        },
+                        "properties": {"pixelSize": 250},
+                        "fields": "pixelSize",
+                    }
+                },
+            ]
+        )
+
+    if formatting_requests:
+        try:
+            await c_sheet.batch_update({"requests": formatting_requests})
+        except Exception as e:
+            print(f"Error applying formatting to Spreadsheet C: {e}")
 
 
 async def clear_user_from_sheets(user):

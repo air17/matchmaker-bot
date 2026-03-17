@@ -252,6 +252,7 @@ async def process_answer(callback: types.CallbackQuery, state: FSMContext):
     asyncio.create_task(asyncio.to_thread(gs.recalculate_top_matches))
     
     # Send chosen feedback shortly and load next
+    await callback.answer()  # Clear the button spinner
     await callback.message.edit_text(f"<i>Question '{question['text'][:15]}...' answered: {answer_text}</i>", parse_mode="HTML")
     await serve_next_question(callback.message, state, callback.from_user.id)
 
@@ -263,3 +264,9 @@ async def catch_all(message: types.Message, state: FSMContext):
         pass
     else:
         await message.reply("Please use the inline buttons or type /start to register.")
+
+# Fallback: silently answer any stale / unrecognised callback queries so
+# Telegram doesn't show a "loading" spinner forever on old inline buttons.
+@router.callback_query()
+async def catch_all_callbacks(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer("This button is no longer active.", show_alert=False)

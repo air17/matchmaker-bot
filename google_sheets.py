@@ -164,9 +164,10 @@ def recalculate_top_matches():
 
     completed_users = [u for u in users if u.get("status") == "complete"]
 
-    # Calculate all pairwise filtered matches
-    # We need to map user_id -> list of matches
+    # all_user_matches: every completed user paired with every other (for personal sheets)
+    # filtered_user_matches: only mutually compatible pairs (for summary sheet)
     all_user_matches = {u["user_id"]: [] for u in completed_users}
+    filtered_user_matches = {u["user_id"]: [] for u in completed_users}
 
     all_questions = db.get_all_questions()
     q_map = {q["text"]: i + 1 for i, q in enumerate(all_questions)}
@@ -184,6 +185,14 @@ def recalculate_top_matches():
                 if qtext in q_map:
                     matched_q_indices.append(str(q_map[qtext]))
 
+        matched_q_indices.sort(key=int)
+        shared_q_str = ", ".join(matched_q_indices)
+        u1_display = f"{u1['name']} (@{u1['username']})"
+        u2_display = f"{u2['name']} (@{u2['username']})"
+
+        all_user_matches[u1["user_id"]].append((u2_display, match_count, shared_q_str))
+        all_user_matches[u2["user_id"]].append((u1_display, match_count, shared_q_str))
+
         u1_gender, u1_looking = (
             u1.get("gender", "").lower(),
             u1.get("looking_for", "").lower(),
@@ -197,28 +206,21 @@ def recalculate_top_matches():
         match_2_likes_1 = u2_looking == "all" or u2_looking == u1_gender
 
         if match_1_likes_2 and match_2_likes_1:
-            # Sort indices numerically
-            matched_q_indices.sort(key=int)
-            shared_q_str = ", ".join(matched_q_indices)
-            u1_display = f"{u1['name']} (@{u1['username']})"
-            u2_display = f"{u2['name']} (@{u2['username']})"
-
-            all_user_matches[u1["user_id"]].append(
+            filtered_user_matches[u1["user_id"]].append(
                 (u2_display, match_count, shared_q_str)
             )
-            all_user_matches[u2["user_id"]].append(
+            filtered_user_matches[u2["user_id"]].append(
                 (u1_display, match_count, shared_q_str)
             )
 
-    # Identify top match for each user for the summary sheet
+    # Identify top compatible match for each user for the summary sheet
     top_matches_summary = []
 
     for u in completed_users:
         uid = u["user_id"]
         u_display = f"{u['name']} (@{u['username']})"
-        matches = all_user_matches[uid]
+        matches = filtered_user_matches[uid]
         if matches:
-            # Sort by match_count descending
             matches.sort(key=lambda x: x[1], reverse=True)
             top_match = matches[0]
             top_matches_summary.append(

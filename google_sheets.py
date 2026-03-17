@@ -138,6 +138,98 @@ async def update_user_roster():
     await ws.update(rows)
 
 
+async def ensure_question_sheets(questions):
+    """Ensures that each question has a corresponding tab in Spreadsheet B."""
+    _, b_sheet = await _ensure_b_client()
+    if not b_sheet:
+        return
+
+    worksheets = await b_sheet.worksheets()
+    ws_map = {ws.title: ws for ws in worksheets}
+
+    formatting_requests = []
+    for idx, q in enumerate(questions):
+        q_tab_name = f"Вопрос {idx + 1}"
+        if q_tab_name not in ws_map:
+            ws = await b_sheet.add_worksheet(title=q_tab_name, rows=100, cols=3)
+            await ws.append_row([q["text"]])
+            await ws.append_row(["Имя", "Username", "Ответ"])
+        else:
+            ws = ws_map[q_tab_name]
+            first_row = await ws.row_values(1)
+            if not first_row or first_row[0] != q["text"]:
+                await ws.update_cell(1, 1, q["text"])
+
+        # Add formatting requests for this question sheet
+        formatting_requests.extend(
+            [
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": ws.id,
+                            "startRowIndex": 0,
+                            "endRowIndex": 1,
+                            "startColumnIndex": 0,
+                            "endColumnIndex": 1,
+                        },
+                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+                        "fields": "userEnteredFormat.textFormat.bold",
+                    }
+                },
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": ws.id,
+                            "startColumnIndex": 2,
+                            "endColumnIndex": 3,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": {
+                                    "red": 0.92,
+                                    "green": 1.0,
+                                    "blue": 0.92,
+                                }
+                            }
+                        },
+                        "fields": "userEnteredFormat.backgroundColor",
+                    }
+                },
+                {
+                    "updateDimensionProperties": {
+                        "range": {
+                            "sheetId": ws.id,
+                            "dimension": "COLUMNS",
+                            "startIndex": 2,
+                            "endIndex": 3,
+                        },
+                        "properties": {"pixelSize": 1000},
+                        "fields": "pixelSize",
+                    }
+                },
+            ]
+        )
+
+    if formatting_requests:
+        try:
+            await b_sheet.batch_update({"requests": formatting_requests})
+        except Exception as e:
+            print(f"Error applying batch formatting: {e}")
+
+    # Cleanup stale sheets
+    num_questions = len(questions)
+    for ws_title, ws in ws_map.items():
+        if ws_title.startswith("Вопрос "):
+            try:
+                title_parts = ws_title.split()
+                if len(title_parts) == 2:
+                    q_num = int(title_parts[1])
+                    if q_num > num_questions:
+                        await b_sheet.del_worksheet(ws)
+            except (ValueError, IndexError):
+                pass
+
+
 async def append_answer_to_q_sheet(user, question, answer_text):
     """Appends an answer to 'Q#' tab."""
     _, b_sheet = await _ensure_b_client()
@@ -158,6 +250,62 @@ async def append_answer_to_q_sheet(user, question, answer_text):
         ws = await b_sheet.add_worksheet(title=q_tab_name, rows=100, cols=10)
         await ws.append_row([question["text"]])
         await ws.append_row(["Имя", "Username", "Ответ"])
+        # Format the new sheet
+        try:
+            await b_sheet.batch_update(
+                {
+                    "requests": [
+                        {
+                            "repeatCell": {
+                                "range": {
+                                    "sheetId": ws.id,
+                                    "startRowIndex": 0,
+                                    "endRowIndex": 1,
+                                    "startColumnIndex": 0,
+                                    "endColumnIndex": 1,
+                                },
+                                "cell": {
+                                    "userEnteredFormat": {"textFormat": {"bold": True}}
+                                },
+                                "fields": "userEnteredFormat.textFormat.bold",
+                            }
+                        },
+                        {
+                            "repeatCell": {
+                                "range": {
+                                    "sheetId": ws.id,
+                                    "startColumnIndex": 2,
+                                    "endColumnIndex": 3,
+                                },
+                                "cell": {
+                                    "userEnteredFormat": {
+                                        "backgroundColor": {
+                                            "red": 0.92,
+                                            "green": 1.0,
+                                            "blue": 0.92,
+                                        }
+                                    }
+                                },
+                                "fields": "userEnteredFormat.backgroundColor",
+                            }
+                        },
+                        {
+                            "updateDimensionProperties": {
+                                "range": {
+                                    "sheetId": ws.id,
+                                    "dimension": "COLUMNS",
+                                    "startIndex": 2,
+                                    "endIndex": 3,
+                                },
+                                "properties": {"pixelSize": 1000},
+                                "fields": "pixelSize",
+                            }
+                        },
+                    ]
+                }
+            )
+        except Exception as e:
+            print(f"Error formatting new worksheet: {e}")
 
     await ws.append_row([user["name"], user["username"], answer_text])
 

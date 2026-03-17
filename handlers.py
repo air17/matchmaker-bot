@@ -37,6 +37,7 @@ async def cmd_update(message: types.Message, state: FSMContext):
         )
         return
     db.sync_questions(questions)
+    await gs.ensure_question_sheets(questions)
 
     answers_data = await gs.sync_answers(questions)
     if answers_data:

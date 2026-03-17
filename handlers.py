@@ -74,10 +74,16 @@ async def cmd_reset_user(message: types.Message, state: FSMContext):
     db.delete_user(target_user["user_id"])
 
     # Delete from Sheets
-    await message.reply("Удаление пользователя из таблицы...")
-    gs.clear_user_from_sheets(target_user)
+    await message.reply(
+        f"Пользователь {target_user['name']} удалён из базы. Очистка Google Sheets..."
+    )
 
-    await message.reply(f"Пользователь {target_user['name']} был сброшен.")
+    # Run heavy sheet operations in a thread
+    await asyncio.to_thread(gs.clear_user_from_sheets, target_user)
+
+    await message.reply(
+        f"Готово! Пользователь {target_user['name']} полностью удалён из базы и таблиц. Топ мэтчей обновлён."
+    )
 
 
 @router.message(Command("add_admin"))

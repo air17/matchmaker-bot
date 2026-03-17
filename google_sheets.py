@@ -257,20 +257,36 @@ def recalculate_top_matches():
 
 
 def clear_user_from_sheets(user):
-    # Overly complex to individually delete rows, simpler to just fully rebuild everything
-    update_user_roster()
-    recalculate_top_matches()
-    # For Q# tabs, we won't purge them immediately without full sync to avoid API hit limits,
-    # but the assignment requests removing them.
-    # To do it properly:
+    """Removes user from all rosters and deletes their individual top matches sheet."""
     _, b_sheet = _ensure_b_client()
     if not b_sheet:
         return
+
+    # 1. Update User Roster (removes from 'Пользователи')
+    update_user_roster()
+
+    # 2. Delete individual Top sheet
+    try:
+        sheet_name = f"Топ {user['name']}"[:100]
+        ws_user = b_sheet.worksheet(sheet_name)
+        b_sheet.del_worksheet(ws_user)
+    except gspread.exceptions.WorksheetNotFound:
+        pass
+    except Exception as e:
+        print(f"Error deleting user sheet: {e}")
+
+    # 3. Recalculate Top Matches (updates 'Топ мэтчей' and other users' sheets)
+    recalculate_top_matches()
+
+    # 4. Remove user from 'Вопрос #' sheets
     for ws in b_sheet.worksheets():
         if ws.title.startswith("Вопрос"):
             try:
+                # Find by username since it's unique and present in those sheets
                 cell = ws.find(user["username"])
                 if cell:
                     ws.delete_rows(cell.row)
             except gspread.exceptions.CellNotFound:
                 pass
+            except Exception as e:
+                print(f"Error removing user from {ws.title}: {e}")

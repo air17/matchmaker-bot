@@ -27,7 +27,7 @@ def ensure_admin(func):
 @ensure_admin
 async def cmd_update(message: types.Message, state: FSMContext):
     await message.reply("Синхронизация вопросов из Google Sheets...")
-    questions = gs.sync_questions()
+    questions = await gs.sync_questions()
     if not questions:
         await message.reply(
             "Не удалось синхронизировать. Проверьте логи или таблицу пуста."
@@ -35,11 +35,11 @@ async def cmd_update(message: types.Message, state: FSMContext):
         return
     db.sync_questions(questions)
 
-    answers_data = gs.sync_answers(questions)
+    answers_data = await gs.sync_answers(questions)
     if answers_data:
         db.sync_answers_from_data(answers_data)
 
-    gs.recalculate_top_matches()
+    await gs.recalculate_top_matches()
 
     await message.reply(
         f"Успешно синхронизировано {len(questions)} вопросов и {len(answers_data)} ответов из таблиц."
@@ -78,8 +78,7 @@ async def cmd_reset_user(message: types.Message, state: FSMContext):
         f"Пользователь {target_user['name']} удалён из базы. Очистка Google Sheets..."
     )
 
-    # Run heavy sheet operations in a thread
-    await asyncio.to_thread(gs.clear_user_from_sheets, target_user)
+    await gs.clear_user_from_sheets(target_user)
 
     await message.reply(
         f"Готово! Пользователь {target_user['name']} полностью удалён из базы и таблиц. Топ мэтчей обновлён."
@@ -197,7 +196,7 @@ async def process_name(message: types.Message, state: FSMContext):
         name=message.text,
         username=message.from_user.username,
     )
-    gs.update_user_roster()
+    await gs.update_user_roster()
 
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Мужской", callback_data="gender_male"))
@@ -221,7 +220,7 @@ async def process_gender(callback: types.CallbackQuery, state: FSMContext):
         username=user["username"],
         gender=gender,
     )
-    gs.update_user_roster()
+    await gs.update_user_roster()
 
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Мужчин", callback_data="looking_male"))
@@ -252,7 +251,7 @@ async def process_looking_for(callback: types.CallbackQuery, state: FSMContext):
         looking_for=looking_for,
         status="answering",
     )
-    gs.update_user_roster()
+    await gs.update_user_roster()
 
     await callback.message.edit_text(
         f"Ищу: {looking_for.capitalize()}\nОтлично. Начинаем вопросы."
@@ -300,8 +299,8 @@ async def serve_next_question(message: types.Message, state: FSMContext, user_id
             looking_for=user["looking_for"],
             status="complete",
         )
-        asyncio.create_task(asyncio.to_thread(gs.update_user_roster))
-        asyncio.create_task(asyncio.to_thread(gs.recalculate_top_matches))
+        asyncio.create_task(gs.update_user_roster())
+        asyncio.create_task(gs.recalculate_top_matches())
         await message.answer("Поздравляем! Вы ответили на все вопросы.")
         await state.clear()
         return
@@ -361,7 +360,7 @@ async def process_answer(callback: types.CallbackQuery, state: FSMContext):
 
     db.save_answer(callback.from_user.id, question["text"], answer_text)
     user = db.get_user(callback.from_user.id)
-    gs.append_answer_to_q_sheet(user, question, answer_text)
+    await gs.append_answer_to_q_sheet(user, question, answer_text)
 
     # Send chosen feedback shortly and load next
     await callback.answer()  # Clear the button spinner

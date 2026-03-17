@@ -1,7 +1,9 @@
 import gspread
+import gspread_asyncio
 import os
 from dotenv import load_dotenv
 from itertools import combinations
+from google.oauth2.service_account import Credentials
 import database as db
 
 load_dotenv()
@@ -11,25 +13,41 @@ SPREADSHEET_B_ID = os.getenv("SPREADSHEET_B_ID")
 GOOGLE_CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_FILE")
 
 
-def get_client():
+def get_creds():
+    creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE)
+    scoped = creds.with_scopes(
+        [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+    )
+    return scoped
+
+
+agcm = gspread_asyncio.AsyncioGspreadClientManager(get_creds)
+
+
+async def get_client():
     if not GOOGLE_CREDENTIALS_FILE or not os.path.exists(GOOGLE_CREDENTIALS_FILE):
         return None
     try:
-        client = gspread.service_account(filename=GOOGLE_CREDENTIALS_FILE)
+        client = await agcm.authorize()
         return client
     except Exception as e:
         print(f"Auth error: {e}")
         return None
 
 
-def sync_questions():
+async def sync_questions():
     """Reads Spreadsheet A and returns formatted questions for SQLite."""
-    client = get_client()
+    client = await get_client()
     if not client:
         return []
     try:
-        sheet_a = client.open_by_key(SPREADSHEET_A_ID).sheet1
-        records = sheet_a.get_all_records()
+        sheet_a = await client.open_by_key(SPREADSHEET_A_ID)
+        ws = await sheet_a.get_worksheet(0)
+        records = await ws.get_all_records()
         questions_data = []
         for row in records:
             q_text = row.get("Question_Text")
@@ -46,28 +64,28 @@ def sync_questions():
         return []
 
 
-def _ensure_b_client():
-    client = get_client()
+async def _ensure_b_client():
+    client = await get_client()
     if not client:
         return None, None
     try:
-        b_sheet = client.open_by_key(SPREADSHEET_B_ID)
+        b_sheet = await client.open_by_key(SPREADSHEET_B_ID)
         return client, b_sheet
     except Exception as e:
         print(f"Error opening Spreadsheet B: {e}")
         return None, None
 
 
-def sync_answers(questions):
-    _, b_sheet = _ensure_b_client()
+async def sync_answers(questions):
+    _, b_sheet = await _ensure_b_client()
     if not b_sheet:
         return []
     answers_data = []
     for idx, q in enumerate(questions):
         q_tab_name = f"Вопрос {idx + 1}"
         try:
-            ws = b_sheet.worksheet(q_tab_name)
-            rows = ws.get_all_values()
+            ws = await b_sheet.worksheet(q_tab_name)
+            rows = await ws.get_all_values()
             if len(rows) > 2:
                 for row in rows[2:]:
                     if len(row) >= 3:
@@ -88,17 +106,19 @@ def sync_answers(questions):
     return answers_data
 
 
-def update_user_roster():
+async def update_user_roster():
     """Writes all users to 'Users' tab in Spreadsheet B."""
-    _, b_sheet = _ensure_b_client()
+    _, b_sheet = await _ensure_b_client()
     if not b_sheet:
         return
 
     try:
-        ws = b_sheet.worksheet("Пользователи")
+        ws = await b_sheet.worksheet("Пользователи")
     except gspread.exceptions.WorksheetNotFound:
-        ws = b_sheet.add_worksheet(title="Пользователи", rows="100", cols="10")
-        ws.append_row(["ID пользователя", "Имя", "Username", "Пол", "Ищет", "Статус"])
+        ws = await b_sheet.add_worksheet(title="Пользователи", rows=100, cols=10)
+        await ws.append_row(
+            ["ID пользователя", "Имя", "Username", "Пол", "Ищет", "Статус"]
+        )
 
     users = db.get_all_users()
     rows = [["ID пользователя", "Имя", "Username", "Пол", "Ищет", "Статус"]]
@@ -114,19 +134,16 @@ def update_user_roster():
             ]
         )
 
-    ws.clear()
-    ws.update(rows)
+    await ws.clear()
+    await ws.update(rows)
 
 
-def append_answer_to_q_sheet(user, question, answer_text):
+async def append_answer_to_q_sheet(user, question, answer_text):
     """Appends an answer to 'Q#' tab."""
-    _, b_sheet = _ensure_b_client()
+    _, b_sheet = await _ensure_b_client()
     if not b_sheet:
         return
 
-    # We will just generate a tab name based on a sanitized version or simply use an index if we tracked it,
-    # but the requirement states "One tab per question". Since we removed ID, let's use a snippet of the text
-    # or enumerate them from the sorted questions.
     all_questions = db.get_all_questions()
     q_index = 1
     for idx, q in enumerate(all_questions):
@@ -136,25 +153,24 @@ def append_answer_to_q_sheet(user, question, answer_text):
 
     q_tab_name = f"Вопрос {q_index}"
     try:
-        ws = b_sheet.worksheet(q_tab_name)
+        ws = await b_sheet.worksheet(q_tab_name)
     except gspread.exceptions.WorksheetNotFound:
-        ws = b_sheet.add_worksheet(title=q_tab_name, rows="100", cols="10")
-        ws.append_row([question["text"]])
-        ws.append_row(["Имя", "Username", "Ответ"])
+        ws = await b_sheet.add_worksheet(title=q_tab_name, rows=100, cols=10)
+        await ws.append_row([question["text"]])
+        await ws.append_row(["Имя", "Username", "Ответ"])
 
-    ws.append_row([user["name"], user["username"], answer_text])
+    await ws.append_row([user["name"], user["username"], answer_text])
 
 
-def recalculate_top_matches():
+async def recalculate_top_matches():
     """Calculates top matches and writes to Spreadsheet B."""
-    _, b_sheet = _ensure_b_client()
+    _, b_sheet = await _ensure_b_client()
     if not b_sheet:
         return
 
     users = db.get_all_users()
     answers = db.get_all_answers()
 
-    # Map user id to answers
     user_answers = {}
     for a in answers:
         uid = a["user_id"]
@@ -164,8 +180,6 @@ def recalculate_top_matches():
 
     completed_users = [u for u in users if u.get("status") == "complete"]
 
-    # all_user_matches: every completed user paired with every other (for personal sheets)
-    # filtered_user_matches: only mutually compatible pairs (for summary sheet)
     all_user_matches = {u["user_id"]: [] for u in completed_users}
     filtered_user_matches = {u["user_id"]: [] for u in completed_users}
 
@@ -213,9 +227,7 @@ def recalculate_top_matches():
                 (u1_display, match_count, shared_q_str)
             )
 
-    # Identify top compatible match for each user for the summary sheet
     top_matches_summary = []
-
     for u in completed_users:
         uid = u["user_id"]
         u_display = f"{u['name']} (@{u['username']})"
@@ -229,71 +241,60 @@ def recalculate_top_matches():
         else:
             top_matches_summary.append([u_display, "Нет мэтчей", 0, ""])
 
-    # Write Top Matches Summary
     try:
-        ws_summary = b_sheet.worksheet("Топ мэтчей")
+        ws_summary = await b_sheet.worksheet("Топ мэтчей")
     except gspread.exceptions.WorksheetNotFound:
-        ws_summary = b_sheet.add_worksheet(title="Топ мэтчей", rows="100", cols="10")
+        ws_summary = await b_sheet.add_worksheet(title="Топ мэтчей", rows=100, cols=10)
 
     summary_header = [
         ["Пользователь", "Лучший мэтч", "Совпадений", "Совпавшие вопросы"]
     ]
-    ws_summary.clear()
-    ws_summary.update(summary_header + top_matches_summary)
+    await ws_summary.clear()
+    await ws_summary.update(summary_header + top_matches_summary)
 
-    # Write individual user sheets
     for u in completed_users:
         uid = u["user_id"]
-        # Limit sheet name length as gspread might throw error on super long names, though 100 character limit usually
         sheet_name = f"Топ {u['name']}"[:100]
         try:
-            ws_user = b_sheet.worksheet(sheet_name)
+            ws_user = await b_sheet.worksheet(sheet_name)
         except gspread.exceptions.WorksheetNotFound:
-            ws_user = b_sheet.add_worksheet(title=sheet_name, rows="100", cols="10")
+            ws_user = await b_sheet.add_worksheet(title=sheet_name, rows=100, cols=10)
 
         user_header = [["Мэтч", "Совпадений", "Совпавшие вопросы"]]
-
         matches = all_user_matches[uid]
-        # Make sure they are sorted
         matches.sort(key=lambda x: x[1], reverse=True)
-        # matches elements are (u2_display, match_count, shared_q_str)
-        # convert to list of lists for gspread
         matches_rows = [[m[0], m[1], m[2]] for m in matches]
 
-        ws_user.clear()
-        ws_user.update(user_header + matches_rows)
+        await ws_user.clear()
+        await ws_user.update(user_header + matches_rows)
 
 
-def clear_user_from_sheets(user):
+async def clear_user_from_sheets(user):
     """Removes user from all rosters and deletes their individual top matches sheet."""
-    _, b_sheet = _ensure_b_client()
+    _, b_sheet = await _ensure_b_client()
     if not b_sheet:
         return
 
-    # 1. Update User Roster (removes from 'Пользователи')
-    update_user_roster()
+    await update_user_roster()
 
-    # 2. Delete individual Top sheet
     try:
         sheet_name = f"Топ {user['name']}"[:100]
-        ws_user = b_sheet.worksheet(sheet_name)
-        b_sheet.del_worksheet(ws_user)
+        ws_user = await b_sheet.worksheet(sheet_name)
+        await b_sheet.del_worksheet(ws_user)
     except gspread.exceptions.WorksheetNotFound:
         pass
     except Exception as e:
         print(f"Error deleting user sheet: {e}")
 
-    # 3. Recalculate Top Matches (updates 'Топ мэтчей' and other users' sheets)
-    recalculate_top_matches()
+    await recalculate_top_matches()
 
-    # 4. Remove user from 'Вопрос #' sheets
-    for ws in b_sheet.worksheets():
+    worksheets = await b_sheet.worksheets()
+    for ws in worksheets:
         if ws.title.startswith("Вопрос"):
             try:
-                # Find by username since it's unique and present in those sheets
-                cell = ws.find(user["username"])
+                cell = await ws.find(user["username"])
                 if cell:
-                    ws.delete_rows(cell.row)
+                    await ws.delete_rows(cell.row)
             except gspread.exceptions.CellNotFound:
                 pass
             except Exception as e:
